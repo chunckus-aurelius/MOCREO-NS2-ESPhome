@@ -1,0 +1,271 @@
+substitutions:
+  name: mocreo-ns2
+  friendly_name: MOCREO NS2
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          auto idx = id(screen_rotation).active_index();
+          if (idx.has_value())
+            id(ns2_screen).set_rotation((display::DisplayRotation) (idx.value() * 90));
+      - component.update: ns2_screen
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: arduino
+
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    encryption: 
+
+i2c:
+  sda: GPIO2
+  scl: GPIO1
+  scan: true
+
+sensor:
+  - platform: sht4x
+    temperature:
+      name: "Temperature"
+      id: ns2_temp
+      on_value:
+        - component.update: ns2_screen
+    humidity:
+      name: "Humidity"
+      id: ns2_hum
+    address: 0x44
+    update_interval: 30s
+  - platform: internal_temperature
+    name: "ESP Temperature"
+    id: esp_temp
+    update_interval: 60s
+    entity_category: diagnostic
+
+select:
+  - platform: template
+    name: "Screen Rotation"
+    id: screen_rotation
+    options:
+      - "0°"
+      - "90°"
+      - "180°"
+      - "270°"
+    initial_option: "0°"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    on_value:
+      - lambda: id(ns2_screen).set_rotation((display::DisplayRotation) (i * 90));
+      - component.update: ns2_screen
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO9
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Button"
+    id: button
+    filters:
+      - delayed_on_off: 20ms
+    on_click:
+      - min_length: 30ms
+        max_length: 600ms
+        then:
+          - lambda: id(use_fahrenheit) = !id(use_fahrenheit);
+          - component.update: ns2_screen
+      - min_length: 1s
+        max_length: 5s
+        then:
+          - lambda: |-
+              const float steps[4] = {0.25f, 0.45f, 0.70f, 1.00f};
+              float cur = id(backlight).remote_values.is_on() ? id(backlight).remote_values.get_brightness() : 0.0f;
+              float next = steps[0];
+              for (int i = 0; i < 4; i++) {
+                if (steps[i] > cur + 0.02f) {
+                  next = steps[i];
+                  break;
+                }
+              }
+              auto call = id(backlight).turn_on();
+              call.set_brightness(next);
+              call.perform();
+
+globals:
+  - id: use_fahrenheit
+    type: bool
+    restore_value: true
+    initial_value: "true"
+
+spi:
+  clk_pin: GPIO6
+  mosi_pin: GPIO7
+
+output:
+  - platform: ledc
+    pin: GPIO3
+    id: backlight_pwm
+    frequency: 1000Hz
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Backlight"
+    id: backlight
+    restore_mode: RESTORE_DEFAULT_ON
+    initial_state:
+      brightness: 40%
+    default_transition_length: 300ms
+
+font:
+  - file: "gfonts://Inter@300"
+    id: font_temp
+    size: 56
+    bpp: 4
+    glyphs: "0123456789.-"
+  - file: "gfonts://Inter@400"
+    id: font_unit
+    size: 20
+    bpp: 4
+    glyphs: "°CF"
+  - file: "gfonts://Inter@500"
+    id: font_hum
+    size: 28
+    bpp: 4
+    glyphs: "0123456789%-"
+  - file: "gfonts://Inter@500"
+    id: font_small
+    size: 12
+    bpp: 4
+    glyphs: " 0123456789.-°CFESP"
+  - file: "gfonts://Inter@600"
+    id: font_label
+    size: 13
+    bpp: 4
+    glyphs: " ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+display:
+  - platform: mipi_spi
+    id: ns2_screen
+    model: ST7789V
+    dimensions:
+      width: 240
+      height: 240
+      offset_width: 0
+      offset_height: 0
+    cs_pin: GPIO5
+    dc_pin: GPIO4
+    reset_pin: GPIO8
+    data_rate: 10MHz
+    invert_colors: true
+    buffer_size: 25%
+    update_interval: 30s
+    lambda: |-
+      const Color bg(8, 10, 16);
+      const Color track(40, 46, 58);
+      const Color text_main(240, 244, 250);
+      const Color text_dim(110, 120, 135);
+      const Color text_unit(150, 160, 175);
+      const Color stops[5] = {Color(64, 140, 255), Color(40, 200, 200), Color(110, 215, 90),
+                              Color(255, 180, 40), Color(255, 72, 72)};
+      auto mix = [](Color a, Color b, float t) -> Color {
+        return Color((uint8_t) (a.r + (b.r - a.r) * t), (uint8_t) (a.g + (b.g - a.g) * t),
+                     (uint8_t) (a.b + (b.b - a.b) * t));
+      };
+      auto grad = [&](float f) -> Color {
+        f = std::max(0.0f, std::min(1.0f, f)) * 4.0f;
+        int i = std::min((int) f, 3);
+        return mix(stops[i], stops[i + 1], f - i);
+      };
+
+      const int cx = 120, cy = 116, r = 98, n = 46;
+      auto px = [&](int k) { return cx + (int) roundf(r * cosf((135.0f + 270.0f * k / (n - 1)) * M_PI / 180.0f)); };
+      auto py = [&](int k) { return cy + (int) roundf(r * sinf((135.0f + 270.0f * k / (n - 1)) * M_PI / 180.0f)); };
+
+      it.fill(bg);
+
+      bool has_t = id(ns2_temp).has_state() && !std::isnan(id(ns2_temp).state);
+      bool has_h = id(ns2_hum).has_state() && !std::isnan(id(ns2_hum).state);
+      float tc = has_t ? id(ns2_temp).state : 0.0f;
+      float frac = (tc - 10.0f) / 25.0f;
+      int lit = has_t ? (int) roundf(std::max(0.0f, std::min(1.0f, frac)) * (n - 1)) : -1;
+
+      for (int k = 0; k < n; k++) {
+        if (k <= lit)
+          it.filled_circle(px(k), py(k), 4, grad((float) k / (n - 1)));
+        else
+          it.filled_circle(px(k), py(k), 2, track);
+      }
+      if (lit >= 0) {
+        it.filled_circle(px(lit), py(lit), 8, grad((float) lit / (n - 1)));
+        it.filled_circle(px(lit), py(lit), 4, Color(255, 255, 255));
+      }
+
+      it.print(cx, cy - 44, id(font_label), text_dim, TextAlign::CENTER, "TEMPERATURE");
+
+      if (has_t) {
+        float shown = id(use_fahrenheit) ? tc * 9.0f / 5.0f + 32.0f : tc;
+        char buf[12];
+        snprintf(buf, sizeof(buf), "%.1f", shown);
+        const char *unit = id(use_fahrenheit) ? "°F" : "°C";
+        int x1, y1, w, h, ux1, uy1, uw, uh;
+        it.get_text_bounds(0, 0, buf, id(font_temp), TextAlign::TOP_LEFT, &x1, &y1, &w, &h);
+        it.get_text_bounds(0, 0, unit, id(font_unit), TextAlign::TOP_LEFT, &ux1, &uy1, &uw, &uh);
+        int x0 = cx - (w + 3 + uw) / 2;
+        int ty = cy - 2 - h / 2;
+        it.print(x0, ty, id(font_temp), text_main, TextAlign::TOP_LEFT, buf);
+        it.print(x0 + w + 3, ty + 8, id(font_unit), text_unit, TextAlign::TOP_LEFT, unit);
+        const char *lab = tc < 18.0f ? "COOL" : (tc <= 26.0f ? "COMFORTABLE" : "WARM");
+        it.print(cx, cy + 40, id(font_label), grad(frac), TextAlign::CENTER, lab);
+      } else {
+        it.print(cx, cy - 2, id(font_temp), text_main, TextAlign::CENTER, "--");
+        it.print(cx, cy + 40, id(font_label), stops[4], TextAlign::CENTER, "NO PROBE");
+      }
+
+      float hum = has_h ? id(ns2_hum).state : 0.0f;
+      Color hc = !has_h ? stops[1] : (hum < 30.0f ? stops[3] : (hum > 60.0f ? stops[0] : stops[1]));
+      char hbuf[8];
+      if (has_h)
+        snprintf(hbuf, sizeof(hbuf), "%.0f%%", hum);
+      else
+        snprintf(hbuf, sizeof(hbuf), "--%%");
+      int hx1, hy1, hw, hh;
+      it.get_text_bounds(0, 0, hbuf, id(font_hum), TextAlign::TOP_LEFT, &hx1, &hy1, &hw, &hh);
+      int gx = cx - (14 + 6 + hw) / 2;
+      const int hy = 208;
+      it.filled_circle(gx + 7, hy + 3, 7, hc);
+      it.filled_triangle(gx, hy + 1, gx + 14, hy + 1, gx + 7, hy - 11, hc);
+      it.print(gx + 20, hy, id(font_hum), text_main, TextAlign::CENTER_LEFT, hbuf);
+
+      if (id(esp_temp).has_state() && !std::isnan(id(esp_temp).state)) {
+        float et = id(use_fahrenheit) ? id(esp_temp).state * 9.0f / 5.0f + 32.0f : id(esp_temp).state;
+        it.printf(234, 236, id(font_small), text_dim, TextAlign::BOTTOM_RIGHT, "ESP %.0f%s", et,
+                  id(use_fahrenheit) ? "°F" : "°C");
+      }
+
+      const int bx = 80, bw = 80, by = 230;
+      it.filled_rectangle(bx, by, bw, 4, track);
+      if (has_h) {
+        int fw = (int) (bw * std::max(0.0f, std::min(100.0f, hum)) / 100.0f);
+        if (fw > 0)
+          it.filled_rectangle(bx, by, fw, 4, hc);
+      }

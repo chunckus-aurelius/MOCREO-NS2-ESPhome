@@ -1,0 +1,12 @@
+/*
+!/.gitignore
+!/README.md
+!/LICENSE
+!/esphome/
+/esphome/*
+!/esphome/mocreo-ns2.yaml
+!/esphome/secrets.yaml.example
+!/docs/
+/docs/*
+!/docs/board.jpg
+!/docs/screen-mockup.png
