@@ -9,9 +9,7 @@ that has a full-colour dashboard on the built-in 240×240 IPS screen.
   <em>Dashboard layout (mock-up). Left to right: °F reading, a warm °C reading, no probe connected.</em>
 </p>
 
-> **Status:** running on a real unit. The display, backlight, button and SHT40 sensor are
-> verified on hardware. Screen rotation at 180°/270° hasn't been tested yet (see
-> [Known issues](#known-issues)).
+> **Status:** running on a real unit. Everything listed below is verified on hardware.
 
 ## Features
 
@@ -118,9 +116,6 @@ the chip will start in download mode instead of running the firmware.
 
 ## Known issues
 
-- **Rotation at 180° / 270° is untested.** If the image shows up shifted, with a band of
-  noise, the panel controller has 240×320 RAM and needs an 80 px offset at those angles.
-  Please open an issue if you see this.
 - The buzzer (GPIO20) is wired but not used yet.
 
 ## License
